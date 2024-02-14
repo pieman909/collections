@@ -1,0 +1,3 @@
+/home/spurdo_sparde/Documents/1Cpp_Stuf/cmake-build-debug/CMakeFiles/1Cpp_Stuf.dir
+/home/spurdo_sparde/Documents/1Cpp_Stuf/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/spurdo_sparde/Documents/1Cpp_Stuf/cmake-build-debug/CMakeFiles/rebuild_cache.dir
