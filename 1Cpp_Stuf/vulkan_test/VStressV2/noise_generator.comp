@@ -1,0 +1,31 @@
+#version 450
+
+// This shader generates a procedural noise texture.
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// We bind the texture as a storage image to write to it.
+layout (binding = 0, rgba8) uniform writeonly image2D destTexture;
+
+// Simple pseudo-random function
+float rand(vec2 co){
+    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
+}
+
+void main() {
+    ivec2 storePos = ivec2(gl_GlobalInvocationID.xy);
+
+    // Get the dimensions of the texture we are writing to
+    ivec2 size = imageSize(destTexture);
+
+    // Stop if we are out of bounds
+    if (storePos.x >= size.x || storePos.y >= size.y) {
+        return;
+    }
+
+    float r = rand(vec2(storePos));
+    float g = rand(vec2(storePos.x + 100.0, storePos.y - 50.0));
+    float b = rand(vec2(storePos.y - 100.0, storePos.x + 50.0));
+
+    // Write a random color to the texture
+    imageStore(destTexture, storePos, vec4(r, g, b, 1.0));
+}

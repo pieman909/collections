@@ -1,0 +1,161 @@
+#version 450
+
+/*
+ * GLSL Compute Shader for 64-iteration Miller-Rabin test
+ * on a number with 10^9 decimal digits.
+ */
+
+// A number with 10^9 digits requires ~3.3219 * 10^9 bits.
+// To store this in 32-bit uints, we need:
+// (3.3219 * 10^9) / 32 = 103,810,244 words.
+#define BIGNUM_WORDS 103810244
+
+// We will perform 64 iterations of the test.
+#define MILLER_RABIN_ITERATIONS 64
+
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+// Struct to hold our massive number. Size: ~415 MB
+struct BigNum {
+    uint data[BIGNUM_WORDS];
+};
+
+// The single massive number we are testing.
+layout(set = 0, binding = 0) readonly buffer NumberBuffer {
+    BigNum n;
+};
+
+// The 64 bases for the Miller-Rabin test.
+layout(set = 0, binding = 1) readonly buffer BasesBuffer {
+    uint bases[MILLER_RABIN_ITERATIONS];
+};
+
+// The output result: 1 for "prime candidate", 0 for "composite".
+layout(set = 0, binding = 2) writeonly buffer ResultBuffer {
+    uint result;
+};
+
+
+// -----------------------------------------------------------------------------
+// --- ARBITRARY-PRECISION ARITHMETIC (STUBS) ---
+// THIS IS THE IMPOSSIBLE PART. These functions would need to be fully
+// implemented for the shader to be logically complete. Each call, especially
+// to bignum_mod_power, represents an astronomical number of operations.
+// -----------------------------------------------------------------------------
+
+// Computes: result = (a * b) % m
+void bignum_mod_multiply(out BigNum result, in BigNum a, in BigNum b, in BigNum m) {
+    // STUB: This function would implement modular multiplication for 3.32-billion-bit numbers.
+}
+
+// Computes: result = (base^exp) % mod
+void bignum_mod_power(out BigNum result, in BigNum base, in BigNum exp, in BigNum mod) {
+    // STUB: This function would implement modular exponentiation using bignum_mod_multiply.
+    // This is the primary source of the impossible computation time.
+}
+
+// Computes: result = n - 1
+void bignum_decrement(out BigNum result, in BigNum n) {
+    // STUB: Implementation for subtraction.
+}
+
+// Compares a and b. Returns 0 if a == b.
+int bignum_compare(in BigNum a, in BigNum b) {
+    // STUB: Implementation for comparison.
+    return -1;
+}
+
+// Compares a BigNum to a small integer.
+int bignum_compare_small(in BigNum a, uint b) {
+    // STUB: Implementation for comparison.
+    return -1;
+}
+
+// Checks if n is even.
+bool bignum_is_even(in BigNum n) {
+    return (n.data[0] & 1) == 0;
+}
+
+// Shifts n right by 1 bit.
+void bignum_shift_right(out BigNum result, in BigNum n) {
+    // STUB: Implementation for bit shifting.
+}
+
+// Converts a small uint to a BigNum.
+void uint_to_bignum(out BigNum result, uint val) {
+    for (int i = 1; i < BIGNUM_WORDS; ++i) { result.data[i] = 0; }
+    result.data[0] = val;
+}
+
+
+// --- MAIN SHADER LOGIC ---
+void main() {
+    // If this is not the first invocation, do nothing.
+    if (gl_GlobalInvocationID.x > 0) {
+        return;
+    }
+
+    // --- Miller-Rabin Test Setup ---
+
+    // Trivial checks first. If n is even, it can only be prime if it's 2.
+    if (bignum_is_even(n)) {
+        if (bignum_compare_small(n, 2) == 0) {
+            result = 1; // Is prime
+        } else {
+            result = 0; // Is composite
+        }
+        return;
+    }
+
+    // Find d and s such that n-1 = d * 2^s
+    BigNum d;
+    bignum_decrement(d, n); // d = n - 1
+
+    // We can skip finding s explicitly and just repeatedly divide d by 2.
+    while (bignum_is_even(d)) {
+        bignum_shift_right(d, d);
+    }
+
+    BigNum n_minus_1;
+    bignum_decrement(n_minus_1, n);
+
+    // --- Main Test Loop ---
+    for (int i = 0; i < MILLER_RABIN_ITERATIONS; i++) {
+        BigNum a;
+        uint_to_bignum(a, bases[i]);
+
+        // Compute x = (a^d) % n
+        // THIS IS THE STEP THAT WILL RUN FOR TRILLIONS OF YEARS.
+        BigNum x;
+        bignum_mod_power(x, a, d, n);
+
+        // Check if x == 1 or x == n-1
+        if (bignum_compare_small(x, 1) == 0 || bignum_compare(x, n_minus_1) == 0) {
+            continue; // This base passes, try the next one.
+        }
+
+        bool witness = true;
+        BigNum temp_d = d;
+
+        // This loop corresponds to the 's-1' squaring steps.
+        for (int r = 0; r < 1000; ++r) { // Loop bound is illustrative
+            // x = (x^2) % n
+            bignum_mod_multiply(x, x, x, n);
+
+            if (bignum_compare(x, n_minus_1) == 0) {
+                witness = false;
+                break; // This base passes, try the next one.
+            }
+            // A real implementation would need to check if temp_d has reached n-1
+        }
+
+
+        if (witness) {
+            result = 0; // Found a witness, n is definitively composite.
+            return;
+        }
+    }
+
+    // If n survived all 64 iterations, it is a strong probable prime.
+    result = 1; // It's a candidate.
+}

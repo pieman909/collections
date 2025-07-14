@@ -1,0 +1,68 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+
+/*
+ * =========================================================
+ *  Hybrid GPU Stress Test (Compute + Memory Bandwidth)
+ *  This shader saturates both ALUs and VRAM by performing
+ *  heavy math on every element read from memory.
+ * =========================================================
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// We need two large buffers
+layout(set = 0, binding = 0) readonly buffer InputBuffer {
+    uint data[];
+} input_data;
+
+layout(set = 0, binding = 1) writeonly buffer OutputBuffer {
+    uint data[];
+} output_data;
+
+layout(push_constant) uniform PushConstants {
+    uint buffer_element_count;
+};
+
+
+// --- Heavy Math Function ---
+// This function is designed to be ALU-intensive.
+uint heavy_math(uint val) {
+    uint64_t n = val | 0x1; // Make it odd
+    if (n < 5) return 1;
+
+    // Perform a few iterations of a simplified primality-like test
+    // to generate a heavy, math-focused workload.
+    uint64_t a = (n-1) / 2;
+    uint64_t b = (n-1) / 3;
+    uint64_t res = 1;
+
+    for (int i=0; i < 20; ++i) { // This loop determines the math intensity
+        uint64_t p = (a * b) % n;
+        res = (res + p) % n;
+        a = (a + 7) % n;
+        b = (b + 13) % n;
+    }
+    return uint(res);
+}
+
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    uint stride = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+
+    // This outer loop ensures we stress the memory bus
+    for (int i = 0; i < 500; ++i) {
+        // Calculate an address
+        uint addr = (index + (i * stride)) % buffer_element_count;
+
+        // 1. READ from VRAM
+        uint val = input_data.data[addr];
+
+        // 2. COMPUTE using the ALUs
+        uint result = heavy_math(val);
+
+        // 3. WRITE back to VRAM
+        output_data.data[addr] = result;
+    }
+}

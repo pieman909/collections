@@ -1,0 +1,18 @@
+# Ubuntu/Debian
+sudo apt install libvulkan-dev libgmp-dev glslc
+
+# Or manually install Vulkan SDK from LunarG
+
+./vulkan_primality_tester 0
+glslc miller_rabin.comp -o miller_rabin.spv
+
+g++ -std=c++17 -O3 -DNDEBUG -o vulkan_primality_tester vulkan_primality_tester.cpp -lvulkan -lgmp
+
+# Show GPU info
+./vulkan_primality_tester 5
+
+# Test a specific number
+./vulkan_primality_tester 1 123456789
+
+# Generate and test 1000-digit number
+./vulkan_primality_tester 2 1000

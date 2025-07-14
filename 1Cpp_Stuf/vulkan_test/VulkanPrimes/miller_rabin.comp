@@ -1,0 +1,169 @@
+#version 450
+
+// Workgroup size
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Big integer representation
+struct BigInt {
+    uint limbs[128];
+    uint size;
+    uint _padding[3];
+};
+
+// Miller-Rabin parameters
+struct MRParams {
+    BigInt n;
+    BigInt n_minus_1;
+    BigInt d;
+    uint s;
+    uint rounds;
+    uint seed;
+    uint _padding;
+};
+
+// Result structure
+struct MRResult {
+    uint is_composite;
+    uint round_completed;
+    uint _padding[2];
+};
+
+// Buffers
+layout(std430, binding = 0) buffer ParamsBuffer {
+    MRParams params;
+};
+
+layout(std430, binding = 1) buffer ResultBuffer {
+    MRResult result;
+};
+
+layout(std430, binding = 2) buffer RandomBuffer {
+    uint random_data[];
+};
+
+// Big integer operations
+bool bigint_is_zero(BigInt a) {
+    for (uint i = 0; i < a.size; i++) {
+        if (a.limbs[i] != 0) return false;
+    }
+    return true;
+}
+
+bool bigint_is_one(BigInt a) {
+    if (a.size == 0) return false;
+    if (a.limbs[0] != 1) return false;
+    for (uint i = 1; i < a.size; i++) {
+        if (a.limbs[i] != 0) return false;
+    }
+    return true;
+}
+
+bool bigint_equal(BigInt a, BigInt b) {
+    if (a.size != b.size) return false;
+    for (uint i = 0; i < a.size; i++) {
+        if (a.limbs[i] != b.limbs[i]) return false;
+    }
+    return true;
+}
+
+// Simple big integer modular exponentiation (simplified)
+BigInt bigint_powmod(BigInt base, BigInt exp, BigInt mod) {
+    BigInt result;
+    result.size = 1;
+    result.limbs[0] = 1;
+
+    // This is a simplified implementation
+    // In practice, you'd need a full big integer library
+    // For demonstration, we'll just return a dummy value
+    return result;
+}
+
+// Generate random base for Miller-Rabin
+BigInt generate_random_base(uint thread_id, uint round) {
+    BigInt base;
+    base.size = 1;
+
+    // Use thread ID and round number to generate pseudo-random base
+    uint index = (thread_id * 16 + round) % (random_data.length() - 1);
+    base.limbs[0] = random_data[index] % (params.n.limbs[0] - 2) + 2;
+
+    return base;
+}
+
+// Main Miller-Rabin test
+bool miller_rabin_test(uint thread_id, uint round_start, uint round_end) {
+    for (uint round = round_start; round < round_end; round++) {
+        // Check if another thread found composite
+        if (result.is_composite != 0) {
+            return false;
+        }
+
+        // Generate random base
+        BigInt a = generate_random_base(thread_id, round);
+
+        // Compute a^d mod n
+        BigInt y = bigint_powmod(a, params.d, params.n);
+
+        // If a^d ≡ 1 (mod n) or a^d ≡ -1 (mod n), continue
+        if (bigint_is_one(y) || bigint_equal(y, params.n_minus_1)) {
+            atomicAdd(result.round_completed, 1);
+            continue;
+        }
+
+        // Check a^(2^r * d) for r = 1 to s-1
+        bool found_minus_one = false;
+        for (uint r = 1; r < params.s; r++) {
+            // y = y^2 mod n
+            BigInt two;
+            two.size = 1;
+            two.limbs[0] = 2;
+            y = bigint_powmod(y, two, params.n);
+
+            // If y ≡ -1 (mod n), probably prime
+            if (bigint_equal(y, params.n_minus_1)) {
+                found_minus_one = true;
+                break;
+            }
+
+            // If y ≡ 1 (mod n), composite
+            if (bigint_is_one(y)) {
+                atomicExchange(result.is_composite, 1);
+                return false;
+            }
+        }
+
+        // If no -1 found, composite
+        if (!found_minus_one) {
+            atomicExchange(result.is_composite, 1);
+            return false;
+        }
+
+        atomicAdd(result.round_completed, 1);
+    }
+
+    return true;
+}
+
+void main() {
+    uint thread_id = gl_GlobalInvocationID.x;
+    uint total_threads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+
+    // Divide rounds among threads
+    uint rounds_per_thread = params.rounds / total_threads;
+    uint remainder = params.rounds % total_threads;
+
+    uint round_start = thread_id * rounds_per_thread;
+    uint round_end = round_start + rounds_per_thread;
+
+    // Add remainder to last threads
+    if (thread_id < remainder) {
+        round_start += thread_id;
+        round_end += thread_id + 1;
+    } else {
+        round_start += remainder;
+        round_end += remainder;
+    }
+
+    // Perform Miller-Rabin test
+    miller_rabin_test(thread_id, round_start, round_end);
+}

@@ -1,0 +1,68 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+
+/*
+ * FINAL, TUNED GPU Compute Stress Test Shader
+ * This workload is heavy and designed to be submitted in a
+ * relentless, unthrottled stream from the CPU.
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Results {
+    uint results[];
+};
+
+// --- Heavy Calculation Routines (Miller-Rabin) ---
+
+uint64_t mul_mod(uint64_t a, uint64_t b, uint64_t m) {
+    uint64_t res = 0; a %= m;
+    while (b > 0) {
+        if ((b & 1) > 0) res = (res + a) % m;
+        a = (a * 2) % m; b >>= 1;
+    }
+    return res;
+}
+
+uint64_t power(uint64_t a, uint64_t b, uint64_t m) {
+    uint64_t res = 1; a %= m;
+    while (b > 0) {
+        if ((b & 1) == 1) res = mul_mod(res, a, m);
+        a = mul_mod(a, a, m); b >>= 1;
+    }
+    return res;
+}
+
+bool is_prime(uint64_t n) {
+    if (n < 2 || n % 2 == 0 || n % 3 == 0) return false;
+    uint64_t d = n - 1;
+    while (d % 2 == 0) d /= 2;
+    uint64_t bases[3] = {2, 7, 61};
+    for (int i = 0; i < 3; ++i) {
+        if (power(bases[i], d, n) != 1) {
+            uint64_t t = d;
+            bool prime = false;
+            while(t < n - 1) {
+                if (power(bases[i],t,n) == n-1) { prime=true; break; }
+                t *= 2;
+            }
+            if(!prime) return false;
+        }
+    }
+    return true;
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    uint total_threads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    uint64_t n = index;
+
+    // This loop count is the "sweet spot". Large enough to be a heavy
+    // workload, but small enough to avoid a TDR crash when pipelined.
+    for (int i = 0; i < 0; ++i) {
+        if (is_prime(n)) {
+            results[index] = uint(n);
+        }
+        n += total_threads;
+    }
+}

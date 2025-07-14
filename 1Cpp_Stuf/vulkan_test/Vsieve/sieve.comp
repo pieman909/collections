@@ -1,0 +1,116 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+
+/*
+ * ===================================================================
+ * CORRECTED GLSL Compute Shader for a Segmented Prime Sieve.
+ * Each thread tests one number for primality.
+ * Fix: Replaced invalid C++ syntax with a proper GLSL implementation
+ * for 64-bit modular multiplication.
+ * ===================================================================
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// A buffer to store the results (1 for prime, 0 for not prime)
+layout(set = 0, binding = 0) buffer Results {
+    uint results[];
+};
+
+// A "push constant" is a small, fast way to send data to the shader.
+layout(push_constant) uniform PushConstants {
+    uint64_t start_offset;
+};
+
+
+// --- 64-bit Miller-Rabin Primality Test ---
+
+// Modular multiplication: (a * b) % m.
+// This is implemented manually to avoid 128-bit overflow.
+uint64_t mul_mod(uint64_t a, uint64_t b, uint64_t m) {
+    uint64_t res = 0;
+    a %= m;
+    while (b > 0) {
+        // If b is odd, add a to result
+        if ((b & 1) > 0) {
+            res = (res + a) % m;
+        }
+        // Double a, and take the modulus
+        a = (a * 2) % m;
+        // Halve b
+        b >>= 1;
+    }
+    return res;
+}
+
+// Modular exponentiation: (a^b) % m
+uint64_t power(uint64_t a, uint64_t b, uint64_t m) {
+    uint64_t res = 1;
+    a %= m;
+    while (b > 0) {
+        if ((b & 1) == 1) res = mul_mod(res, a, m);
+        a = mul_mod(a, a, m);
+        b >>= 1;
+    }
+    return res;
+}
+
+// Deterministic Miller-Rabin test for all 64-bit integers.
+bool is_prime(uint64_t n) {
+    if (n < 2) return false;
+    if (n == 2 || n == 3) return true;
+    if (n % 2 == 0 || n % 3 == 0) return false;
+    if (n < 25) return true;
+
+    uint64_t d = n - 1;
+    while (d % 2 == 0) {
+        d /= 2;
+    }
+
+    // Bases that deterministically cover all 64-bit integers.
+    uint64_t bases[12] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
+
+    for (int i = 0; i < 12; ++i) {
+        uint64_t a = bases[i];
+        if (a >= n) break;
+
+        uint64_t x = power(a, d, n);
+        if (x == 1 || x == n - 1) continue;
+
+        uint64_t temp_d = d;
+        bool composite = true;
+        // This loop corresponds to the 's-1' squaring steps.
+        // A simple bound is sufficient as d starts as n-1
+        for(uint64_t j = 1; j < n; j *= 2) {
+             temp_d *= 2;
+             if (temp_d > n-1) break; // prevent overflow
+             x = mul_mod(x, x, n);
+             if (x == n - 1) {
+                 composite = false;
+                 break;
+             }
+        }
+        if (composite) return false;
+    }
+    return true;
+}
+
+
+void main() {
+    // Unique ID for this thread across all workgroups
+    uint index = gl_GlobalInvocationID.x;
+
+    // The number this thread is responsible for testing
+    uint64_t n = start_offset + index;
+
+    // Ensure we don't test numbers outside the current block size
+    if (index >= 1024 * 1024) { // BLOCK_SIZE from C++
+        return;
+    }
+
+    if (is_prime(n)) {
+        results[index] = 1;
+    } else {
+        results[index] = 0;
+    }
+}

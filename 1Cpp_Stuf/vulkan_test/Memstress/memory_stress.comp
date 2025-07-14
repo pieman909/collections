@@ -1,0 +1,41 @@
+#version 450
+
+/*
+ * =========================================================
+ *  Memory Bandwidth GPU Stress Test
+ *  This shader is designed to saturate the GPU's memory bus
+ *  by continuously copying data between two large buffers.
+ * =========================================================
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// We need two large buffers
+layout(set = 0, binding = 0) readonly buffer InputBuffer {
+    uint data[];
+} input_data;
+
+layout(set = 0, binding = 1) writeonly buffer OutputBuffer {
+    uint data[];
+} output_data;
+
+// We get the size of the buffer from the CPU
+layout(push_constant) uniform PushConstants {
+    uint buffer_element_count;
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    uint stride = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+
+    // This loop forces each thread to read and write many times,
+    // stressing the memory controller and VRAM chips.
+    for (int i = 0; i < 5000; ++i) {
+        // Calculate an address to read from and write to.
+        // We use modulo to ensure we stay within the buffer bounds.
+        uint addr = (index + (i * stride)) % buffer_element_count;
+
+        // Read from buffer 1, do a trivial operation, write to buffer 2.
+        output_data.data[addr] = input_data.data[addr] + 1;
+    }
+}
